@@ -7,7 +7,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Currency,CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-
+import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 
 contract Vix is BaseHook{
     using CurrencyLibrary for Currency;
@@ -52,8 +52,10 @@ contract Vix is BaseHook{
             if(isPairInitiated[token0Id][token1Id]){
                 return (this.afterAddLiquidity.selector, delta);
             }else{
+                
                 isPairInitiated[token0Id][token1Id] = true;
                 return (this.afterAddLiquidity.selector, delta);
+
 
             }
     }
