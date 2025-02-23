@@ -58,7 +58,7 @@ library Volatility{
         return volatility;
     }
 
-        /** 
+    /** 
      * @notice it is babylonian square root method
      * @param x The variance of the tick price.
      * @return y  square root.
