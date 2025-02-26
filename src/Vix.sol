@@ -20,7 +20,7 @@ contract Vix is BaseHook{
     mapping(uint256=>mapping(uint256=>int)) public currentTickMeans;
     mapping(uint256=>mapping(uint256=>int)) public currentM2;
     mapping(uint256=>mapping(uint256=>uint24)) public n; //mean length
-
+    mapping(uint256=>mapping(uint256=>int)) public maxVolatility; // maximum volatility
     address public USDC;
 
     //initiating BaseHook with IPoolManager
@@ -52,7 +52,6 @@ contract Vix is BaseHook{
             address add0 = Currency.unwrap(key.currency0);
             address add1 = Currency.unwrap(key.currency1);
             bool isUsdc = add0 == USDC || add1 == USDC;
-            console.log("isUSDC: ",isUsdc);
             require(isUsdc == true,"only USDC pair");
             return this.beforeAddLiquidity.selector;
      }
@@ -67,8 +66,10 @@ contract Vix is BaseHook{
                 isPairInitiated[token0Id][token1Id] = true;
                 pairInitiatedTime[token0Id][token1Id] = block.timestamp;
                 pairEndingTime[token0Id][token1Id] = block.timestamp + 24 hours;
+                // bitcoins max raw volatile is 6000, so i set it like this. It will increase when pair cross it max volatile
+                maxVolatility[token0Id][token1Id] = 500;
                 return (this.afterAddLiquidity.selector, delta);
-                
+
             }
     }
 
@@ -77,6 +78,7 @@ contract Vix is BaseHook{
         uint256 token1Id = key.currency1.toId();
         n[token0Id][token1Id]++;
        (, int24 currentTick, , ) = poolManager.getSlot0(key.toId());
+      
         int oldTickMeans = currentTickMeans[token0Id][token1Id];
         uint24 currentN = n[token0Id][token1Id];
         int newTickMean = oldTickMeans.updateTickMean(int(currentTick),int24(currentN));
@@ -87,6 +89,31 @@ contract Vix is BaseHook{
         return (this.afterSwap.selector, 0);
     }
 
-   
+   function getPairVolatility(PoolKey calldata key) public returns (int, int) {
+    uint256 token0Id = key.currency0.toId();
+    uint256 token1Id = key.currency1.toId();
+
+    int M2 = currentM2[token0Id][token1Id];
+    int sampleCount = int24(n[token0Id][token1Id]);  // Renamed `n` to `sampleCount`
+    int variance = M2.calculateVariance(sampleCount);
+    int currentTickMean = currentTickMeans[token0Id][token1Id];
+    console.log("variance: ",variance);
+    int vol = variance.getVolatility(currentTickMean);
+    int maxVol = maxVolatility[token0Id][token1Id];
+
+    // Adaptive max volatility update
+    if (vol > maxVol) {
+        maxVol = vol + (vol / 10); // Increase by 10% instead of a fixed 100
+        maxVolatility[token0Id][token1Id] = maxVol;
+    }
+        console.log("volatility: ",vol);
+    // Normalize volatility using Min-Max Scaling
+    int normVol = vol.getNormalizedVolatility(maxVol);
+    // if (normVol > 100) {
+    //     normVol = 100; // Ensure normalized volatility is at most 100%
+    // }
+
+    return (vol, normVol);
+}
 
 }
