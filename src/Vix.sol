@@ -8,7 +8,9 @@ import {Currency,CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol"
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
-import {Volatility} from "./Volatility.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {Volatility} from "./lib/Volatility.sol";
+import {VolatileERC20} from "./VolatileERC20.sol";
 import "forge-std/console.sol";  // Foundry's console library
 contract Vix is BaseHook{
     using CurrencyLibrary for Currency;
@@ -21,6 +23,12 @@ contract Vix is BaseHook{
     mapping(uint256=>mapping(uint256=>int)) public currentM2;
     mapping(uint256=>mapping(uint256=>uint24)) public n; //mean length
     mapping(uint256=>mapping(uint256=>int)) public maxVolatility; // maximum volatility
+    struct VixTokenData {
+        address VIXHIGHTOKEN;
+        address VIXLOWTOKEN;
+    }
+
+    mapping(uint256=>mapping(uint256=>VixTokenData)) vixTokens;
     address public USDC;
 
     //initiating BaseHook with IPoolManager
@@ -29,7 +37,7 @@ contract Vix is BaseHook{
     }
 
     //getting Hook permission  
-   function getHookPermissions() public pure override returns (Hooks.Permissions memory){
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory){
             return Hooks.Permissions({
                 beforeInitialize: false,
                 afterInitialize: false,
@@ -89,31 +97,47 @@ contract Vix is BaseHook{
         return (this.afterSwap.selector, 0);
     }
 
-   function getPairVolatility(PoolKey calldata key) public returns (int, int) {
-    uint256 token0Id = key.currency0.toId();
-    uint256 token1Id = key.currency1.toId();
+    function getPairVolatility(PoolKey calldata key) public returns (int, int) {
+        uint256 token0Id = key.currency0.toId();
+        uint256 token1Id = key.currency1.toId();
 
-    int M2 = currentM2[token0Id][token1Id];
-    int sampleCount = int24(n[token0Id][token1Id]);  // Renamed `n` to `sampleCount`
-    int variance = M2.calculateVariance(sampleCount);
-    int currentTickMean = currentTickMeans[token0Id][token1Id];
-    console.log("variance: ",variance);
-    int vol = variance.getVolatility(currentTickMean);
-    int maxVol = maxVolatility[token0Id][token1Id];
+        int M2 = currentM2[token0Id][token1Id];
+        int sampleCount = int24(n[token0Id][token1Id]);  // Renamed `n` to `sampleCount`
+        int variance = M2.calculateVariance(sampleCount);
+        int currentTickMean = currentTickMeans[token0Id][token1Id];
+        console.log("variance: ",variance);
+        int vol = variance.getVolatility(currentTickMean);
+        int maxVol = maxVolatility[token0Id][token1Id];
 
-    // Adaptive max volatility update
-    if (vol > maxVol) {
+        // Adaptive max volatility update
+        if (vol > maxVol) {
         maxVol = vol + (vol / 10); // Increase by 10% instead of a fixed 100
         maxVolatility[token0Id][token1Id] = maxVol;
-    }
+        }
         console.log("volatility: ",vol);
-    // Normalize volatility using Min-Max Scaling
-    int normVol = vol.getNormalizedVolatility(maxVol);
-    // if (normVol > 100) {
-    //     normVol = 100; // Ensure normalized volatility is at most 100%
-    // }
+        // Normalize volatility using Min-Max Scaling
+        int normVol = vol.getNormalizedVolatility(maxVol);
+  
 
-    return (vol, normVol);
-}
+        return (vol, normVol);
+    }
+
+    function deploy2Currency(uint256 _currency1Id,uint256 _currency2Id, string[2] memory _tokenName, string[2] memory _tokenSymbol) public returns(address[2] memory){
+        address[2] memory vixTokenAddresses;
+        for(uint i = 0; i < 2; i++){
+            VolatileERC20 v_token = new VolatileERC20(_tokenName[i], _tokenSymbol[i],18);
+            vixTokenAddresses[i] = address(v_token);
+            mintVixToken(address(this),address(v_token),50 * 1000000 * (10**18));
+        }
+        vixTokens[_currency1Id][_currency2Id] = VixTokenData(vixTokenAddresses[0],vixTokenAddresses[1]);
+        return (vixTokenAddresses);
+    }
+
+    function mintVixToken(address to,address _token,uint _amount) internal returns (bool){
+        VolatileERC20 v_token = VolatileERC20(_token);
+        v_token.mint(to, _amount);
+        return true;
+    }
+
 
 }
